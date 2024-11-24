@@ -1,0 +1,231 @@
+// 定数定義
+const PAYMENT_AMOUNT = 100;  // 支払額
+const EXECUTION_COUNT = 2;  // 実行回数
+const BUTTON_CLICK_DELAY = 4000; // 購入ボタン再実行の待機時間
+const ELEMENT_TIMEOUT = 5000; // 要素の待機時間
+let scriptStartTime = 0;  // スクリプト開始時間
+let executionAttempts = 0;  // 実行試行回数
+
+// プッシュ通知を送信する関数
+function sendPushNotification(title, message) {
+    if (!("Notification" in window)) {
+        console.error("このブラウザは通知をサポートしていません。");
+        return;
+    }
+
+    // 通知の権限をリクエスト
+    if (Notification.permission === "default") {
+        Notification.requestPermission().then(permission => {
+            if (permission === "granted") {
+                new Notification(title, { body: message });
+            } else {
+                console.warn("通知が許可されませんでした。");
+            }
+        });
+    } else if (Notification.permission === "granted") {
+        new Notification(title, { body: message });
+    } else {
+        console.warn("通知がブロックされています。");
+    }
+}
+
+function findPurchaseButton() {
+    const selector = 'a.link-btn.red.font-normal';
+    const button = document.querySelector(selector);
+    
+    if (button) {
+        console.log(`購入ボタンを発見: ${selector}`);
+        return button;
+    }
+    
+    console.log('購入ボタンが見つかりません');
+    throw new Error('購入ボタンが見つかりません');
+}
+
+function waitForElement(selector, timeout = ELEMENT_TIMEOUT) {
+    return new Promise((resolve, reject) => {
+        if (typeof selector === 'string') {
+            const element = document.querySelector(selector);
+            if (element) {
+                console.log(`要素が即座に見つかりました: ${selector}`);
+                resolve(element);
+                return;
+            }
+        }
+
+        const startTime = Date.now();
+        const checkElement = () => {
+            const element = typeof selector === 'string' 
+                ? document.querySelector(selector) 
+                : selector;
+            
+            if (element) {
+                console.log(`要素が見つかりました: ${selector}`);
+                resolve(element);
+                return;
+            }
+            
+            if (Date.now() - startTime > timeout) {
+                console.warn(`現在のDOM構造:`, document.body.innerHTML);
+                reject(new Error('Element not found'));
+                return;
+            }
+            
+            requestAnimationFrame(checkElement);
+        };
+        
+        checkElement();
+    });
+}
+
+async function executeInput() {
+    try {
+        console.log('入力処理を開始します');
+        
+        const paymentInput = await waitForElement('#payment-points');
+        console.log('支払額入力欄を検出しました');
+        
+        paymentInput.value = PAYMENT_AMOUNT;
+        console.log(`支払額を${PAYMENT_AMOUNT}に設定しました`);
+        
+        ['input', 'change', 'keyup'].forEach(eventType => {
+            paymentInput.dispatchEvent(new Event(eventType, { bubbles: true }));
+            console.log(`支払額の${eventType}イベントを発火しました`);
+        });
+
+        const minReturn = await waitForElement('#price-min-return');
+        console.log('最低希望数の初期値:', minReturn.value);
+
+        function watchMinReturnValue() {
+            minReturn.value = '1';
+            console.log('最低希望数を1に設定しました');
+
+            ['input', 'change', 'keyup', 'blur'].forEach(eventType => {
+                const event = new Event(eventType, { bubbles: true });
+                minReturn.dispatchEvent(event);
+                console.log(`最低希望数の${eventType}イベントを発火しました`);
+            });
+
+            const form = document.getElementById('market-buy-form');
+            if (form) {
+                const formEvent = new Event('change', { bubbles: true });
+                form.dispatchEvent(formEvent);
+                console.log('フォームイベントを発火しました');
+            }
+
+            console.log('設定後の最低希望数:', minReturn.value);
+
+            setTimeout(async () => {
+                const submitButton = document.getElementById('submit');
+                
+                if (submitButton) {
+                    submitButton.click();
+                    console.log('確定ボタンをクリックしました');
+
+                    try {
+                        console.log('購入ボタンを待機中...');
+                        
+                        const buyButton = await waitForElement('a.c-button.js-buy-btn');
+                        
+                        if (buyButton) {
+                            console.log('購入ボタンを発見しました');
+                            
+                            setTimeout(() => {
+                                try {
+                                    buyButton.click();
+                                    console.log('購入ボタンをクリックしました');
+                                    
+                                    executionAttempts++;
+                                    console.log(`実行回数: ${executionAttempts}/${EXECUTION_COUNT}`);
+                                    
+                                    if (executionAttempts < EXECUTION_COUNT) {
+                                        console.log('再実行を開始します...');
+                                        setTimeout(executePurchase, BUTTON_CLICK_DELAY);
+                                    } else {
+                                        const totalDuration = performance.now() - scriptStartTime;
+                                        console.log(`⏱️ 全体の処理時間: ${totalDuration.toFixed(2)}ms`);
+                                    }
+                                    
+                                } catch (error) {
+                                    console.error('購入ボタンのクリック処理でエラー:', error);
+                                    sendPushNotification("エラー", `購入ボタンのクリック処理でエラー: ${error.message}`);
+                                }
+                            }, 10);
+                        } else {
+                            console.log('購入ボタンが見つかりませんでした');
+                        }
+                    } catch (error) {
+                        console.error('購入処理でエラー:', error);
+                        sendPushNotification("エラー", `購入処理でエラー: ${error.message}`);
+                    }
+                } else {
+                    console.log('確定ボタンが見つかりません');
+                }
+            }, 10);
+        }
+
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                const currentValue = minReturn.value;
+                console.log('最低希望数が変更されました:', currentValue);
+                
+                if (currentValue && currentValue !== '1' && currentValue !== '') {
+                    watchMinReturnValue();
+                    observer.disconnect();
+                }
+            });
+        });
+
+        observer.observe(minReturn, {
+            attributes: true,
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+
+        observer.observe(minReturn.parentElement, {
+            attributes: true,
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+
+        if (minReturn.value && minReturn.value !== '1' && minReturn.value !== '') {
+            watchMinReturnValue();
+            observer.disconnect();
+        }
+        
+    } catch (error) {
+        console.error('エラーが発生しました:', error);
+        sendPushNotification("エラー", `エラーが発生しました: ${error.message}`);
+    }
+}
+
+async function executePurchase() {
+    try {
+        console.log('購入処理を開始します');
+        
+        const purchaseButton = findPurchaseButton();
+        console.log('購入ボタンを検出しました:', purchaseButton);
+        
+        purchaseButton.click();
+        console.log('購入ボタンをクリックしました');
+        
+        setTimeout(executeInput, 10);
+    } catch (error) {
+        console.error('エラーが発生しました:', error);
+        sendPushNotification("エラー", `エラーが発生しました: ${error.message}`);
+    }
+}
+
+(async () => {
+    scriptStartTime = performance.now();
+    executionAttempts = 0;
+    
+    try {
+        await executePurchase();
+    } catch (error) {
+        console.error('実行エラー:', error);
+        sendPushNotification("エラー", `実行エラーが発生しました: ${error.message}`);
+    }
+})();
