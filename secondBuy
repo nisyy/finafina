@@ -13,7 +13,6 @@ function sendPushNotification(title, message) {
         return;
     }
 
-    // 通知の権限をリクエスト
     if (Notification.permission === "default") {
         Notification.requestPermission().then(permission => {
             if (permission === "granted") {
@@ -44,37 +43,22 @@ function findPurchaseButton() {
 
 function waitForElement(selector, timeout = ELEMENT_TIMEOUT) {
     return new Promise((resolve, reject) => {
-        if (typeof selector === 'string') {
-            const element = document.querySelector(selector);
-            if (element) {
-                console.log(`要素が即座に見つかりました: ${selector}`);
-                resolve(element);
-                return;
-            }
-        }
-
         const startTime = Date.now();
-        const checkElement = () => {
-            const element = typeof selector === 'string' 
-                ? document.querySelector(selector) 
-                : selector;
+
+        const interval = setInterval(() => {
+            const element = document.querySelector(selector);
             
             if (element) {
                 console.log(`要素が見つかりました: ${selector}`);
+                clearInterval(interval);
                 resolve(element);
-                return;
-            }
-            
-            if (Date.now() - startTime > timeout) {
+            } else if (Date.now() - startTime > timeout) {
+                console.warn(`タイムアウト: 要素が見つかりませんでした: ${selector}`);
                 console.warn(`現在のDOM構造:`, document.body.innerHTML);
-                reject(new Error('Element not found'));
-                return;
+                clearInterval(interval);
+                reject(new Error(`Timeout: Element not found (${selector})`));
             }
-            
-            requestAnimationFrame(checkElement);
-        };
-        
-        checkElement();
+        }, 100); // 100msごとにチェック
     });
 }
 
